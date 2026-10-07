@@ -102,3 +102,76 @@ func (s *Series) Watermarks(stationID string, kinds []Kind) []uint64 {
 	sort.Slice(common, func(i, j int) bool { return common[i] < common[j] })
 	return common
 }
+
+// SharedWatermark returns the newest watermark at which every station carries a
+// sample for every requested kind. A zero result means no aligned snapshot
+// exists across the whole group.
+func (s *Series) SharedWatermark(stationIDs []string, kinds []Kind) (uint64, bool) {
+	if len(stationIDs) == 0 || len(kinds) == 0 {
+		return 0, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var shared map[uint64]struct{}
+	for _, stationID := range stationIDs {
+		perKind := make(map[uint64]int)
+		for _, kind := range kinds {
+			seen := make(map[uint64]struct{})
+			for _, sample := range s.samples[stationID][kind] {
+				seen[sample.Watermark] = struct{}{}
+			}
+			for watermark := range seen {
+				perKind[watermark]++
+			}
+		}
+		complete := make(map[uint64]struct{})
+		for watermark, count := range perKind {
+			if count == len(kinds) {
+				complete[watermark] = struct{}{}
+			}
+		}
+		if len(complete) == 0 {
+			return 0, false
+		}
+		if shared == nil {
+			shared = complete
+			continue
+		}
+		for watermark := range shared {
+			if _, ok := complete[watermark]; !ok {
+				delete(shared, watermark)
+			}
+		}
+		if len(shared) == 0 {
+			return 0, false
+		}
+	}
+	var newest uint64
+	for watermark := range shared {
+		if watermark > newest {
+			newest = watermark
+		}
+	}
+	return newest, true
+}
+
+// MissingAt lists requested kinds that have no sample for the station at the
+// given watermark, preserving the order asked for.
+func (s *Series) MissingAt(stationID string, kinds []Kind, watermark uint64) []Kind {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	missing := make([]Kind, 0)
+	for _, kind := range kinds {
+		found := false
+		for _, sample := range s.samples[stationID][kind] {
+			if sample.Watermark == watermark {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, kind)
+		}
+	}
+	return missing
+}
