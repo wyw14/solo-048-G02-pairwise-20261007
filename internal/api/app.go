@@ -18,6 +18,7 @@ import (
 	"heatpulse/internal/store"
 	"heatpulse/internal/telemetry"
 	"heatpulse/internal/valve"
+	"heatpulse/internal/zoneplan"
 )
 
 type App struct {
@@ -58,6 +59,8 @@ type App struct {
 	Planner              *dispatch.Planner
 	Publisher            *dispatch.Publisher
 	DispatchBuffer       *dispatch.Buffer
+	BalancePlanner       *zoneplan.Planner
+	BalanceExecutor      *zoneplan.Executor
 	StationCommands      *station.CommandService
 	Reconnector          *recovery.Reconnector
 	ZoneRecovery         *recovery.ZoneRecovery
@@ -131,6 +134,13 @@ func NewApp(dataDirectory string) (*App, error) {
 	app.Publisher = dispatch.NewPublisher(planner, targets, recorder)
 	app.Reconnector = recovery.NewReconnector(dispatchBuffer, stations, stationCommands, recorder)
 	app.ZoneRecovery = recovery.NewZoneRecovery(networkState, networkRegistry, warmup, pressure)
+	app.BalancePlanner = zoneplan.NewPlanner(
+		stations, networkState, networkRegistry, app.SnapshotsBuilder, app.Balancer, zoneplan.DefaultOptions(),
+	)
+	app.BalanceExecutor = zoneplan.NewExecutor(
+		app.BalancePlanner, app.SnapshotsBuilder, networkState, networkRegistry,
+		app.Pumps, app.Valves, valveOperations, recorder,
+	)
 	if err := app.seed(); err != nil {
 		return nil, err
 	}

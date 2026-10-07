@@ -80,6 +80,24 @@ func (s *Series) At(stationID string, kind Kind, watermark uint64) (Sample, bool
 	return items[index], true
 }
 
+// MaxWatermark returns the highest watermark carried by any sample for the
+// station across the given kinds, and whether the station has data at all.
+func (s *Series) MaxWatermark(stationID string, kinds []Kind) (uint64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var max uint64
+	found := false
+	for _, kind := range kinds {
+		for _, sample := range s.samples[stationID][kind] {
+			found = true
+			if sample.Watermark > max {
+				max = sample.Watermark
+			}
+		}
+	}
+	return max, found
+}
+
 func (s *Series) Watermarks(stationID string, kinds []Kind) []uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
